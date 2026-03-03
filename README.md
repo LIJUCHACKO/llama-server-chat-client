@@ -20,7 +20,7 @@ go build -o cmdchat main.go
 
 ### Example
 ```
-./cmdchat -ip 127.0.0.1 -port 8089
+./cmdchat -ip 127.0.0.1 -port 8080
 ```
 
 ### Options
@@ -54,6 +54,10 @@ When enabled, the assistant can use these tools:
 - `search_files_with_name`  : Search for files/dirs by glob pattern
 - `search_file_contents`    : Grep files for regex pattern
 - `get_workdir`             : Show working directory
+
+## Additional Instructions
+Additional instructions to enhance system prompt can be mentioned in '.instructions' file in the working directory. Restart the program to take effect.
+
 
 ## Building
 Requires Go 1.18+.
