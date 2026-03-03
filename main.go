@@ -283,32 +283,55 @@ func toolSearchFiles(cfg Config, args map[string]any) string {
 	if err != nil {
 		return "error: " + err.Error()
 	}
+	const maxResults = 500
 	var results []string
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		if privateFiles[d.Name()] {
-			if d.IsDir() {
+		name := d.Name()
+		// Skip hidden directories (e.g. .git, .svn) and private files.
+		if d.IsDir() {
+			if privateFiles[name] || (name != "." && strings.HasPrefix(name, ".")) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		matched, _ := filepath.Match(pattern, d.Name())
+		if privateFiles[name] {
+			return nil
+		}
+		matched, _ := filepath.Match(pattern, name)
 		if matched {
 			rel, _ := filepath.Rel(cfg.WorkDir, p)
 			results = append(results, rel)
+			if len(results) >= maxResults {
+				return filepath.SkipAll
+			}
 		}
 		return nil
 	})
 	if len(results) == 0 {
 		return "no matches"
 	}
-	return strings.Join(results, "\n")
+	out := strings.Join(results, "\n")
+	if len(results) >= maxResults {
+		out += fmt.Sprintf("\n(results capped at %d)", maxResults)
+	}
+	return out
 }
 
 func toolGetWorkDir(cfg Config) string {
 	return cfg.WorkDir
+}
+
+// isBinary reports whether data looks like a binary (non-text) file by
+// checking for a NUL byte in the first 8 KB.
+func isBinary(data []byte) bool {
+	check := data
+	if len(check) > 8192 {
+		check = check[:8192]
+	}
+	return bytes.ContainsRune(check, 0)
 }
 
 func toolGrepFiles(cfg Config, args map[string]any) string {
@@ -328,22 +351,26 @@ func toolGrepFiles(cfg Config, args map[string]any) string {
 	if err != nil {
 		return "error: invalid regexp: " + err.Error()
 	}
+	const maxResults = 500
 	var results []string
+	capped := false
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
+		if err != nil || capped {
 			return nil
 		}
-		if privateFiles[d.Name()] {
-			if d.IsDir() {
+		name := d.Name()
+		// Skip hidden directories (e.g. .git, .svn) and private files.
+		if d.IsDir() {
+			if privateFiles[name] || (name != "." && strings.HasPrefix(name, ".")) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if d.IsDir() {
+		if privateFiles[name] {
 			return nil
 		}
 		data, err := os.ReadFile(p)
-		if err != nil {
+		if err != nil || isBinary(data) {
 			return nil
 		}
 		lines := strings.Split(string(data), "\n")
@@ -351,6 +378,10 @@ func toolGrepFiles(cfg Config, args map[string]any) string {
 		for i, line := range lines {
 			if re.MatchString(line) {
 				results = append(results, fmt.Sprintf("%s:%d: %s", rel, i+1, line))
+				if len(results) >= maxResults {
+					capped = true
+					return filepath.SkipAll
+				}
 			}
 		}
 		return nil
@@ -358,7 +389,11 @@ func toolGrepFiles(cfg Config, args map[string]any) string {
 	if len(results) == 0 {
 		return "no matches"
 	}
-	return strings.Join(results, "\n")
+	out := strings.Join(results, "\n")
+	if capped {
+		out += fmt.Sprintf("\n(results capped at %d)", maxResults)
+	}
+	return out
 }
 
 // ── Tool registry ─────────────────────────────────────────────────────────────
