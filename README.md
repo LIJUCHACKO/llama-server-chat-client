@@ -1,0 +1,66 @@
+# llama.cpp Chat CLI
+
+![Screenshot](screenshot.jpg)
+
+A command-line chat client for llama.cpp and OpenAI-compatible servers, with agentic file-system tools.
+
+## Features
+- Chat with local or remote LLM servers (OpenAI API compatible)
+- Streaming and non-streaming responses
+- Agentic file-system tools (list, read, write, append, move, delete, search, grep)
+- Conversation history persistence
+- Multiline input support
+- Customizable system prompt
+
+## Usage
+```
+go build -o cmdchat main.go
+./cmdchat -ip <server_ip> -port <server_port> [options]
+```
+
+### Example
+```
+./cmdchat -ip 127.0.0.1 -port 8089
+```
+
+### Options
+- `-ip`         : llama.cpp server IP address (default: 10.11.0.9)
+- `-port`       : llama.cpp server port (default: 8089)
+- `-key`        : API key (optional)
+- `-model`      : Model name (default: auto-detect)
+- `-system`     : System prompt (default: "You are a helpful assistant.")
+- `-temp`       : Temperature (default: 0.7)
+- `-max`        : Max tokens (default: 0)
+- `-nostream`   : Disable streaming
+- `-notools`    : Disable file-server tools
+- `-workdir`    : Root directory for file tools (default: cwd)
+
+### In-chat commands
+- `/quit`      : Exit
+- `/clear`     : Clear conversation
+- `/history`   : Show conversation history
+- `/workdir`   : Show current working directory
+- `/help`      : Show help
+
+## File Tools
+When enabled, the assistant can use these tools:
+- `list_dir`                : List directory contents
+- `read_file`               : Read file contents
+- `write_file`              : Overwrite file
+- `append_file`             : Append to file
+- `create_dir`              : Create directory
+- `delete_path`             : Delete file or directory
+- `move_path`               : Move/rename file or directory
+- `search_files_with_name`  : Search for files/dirs by glob pattern
+- `search_file_contents`    : Grep files for regex pattern
+- `get_workdir`             : Show working directory
+
+## Building
+Requires Go 1.18+.
+
+```
+go build -o cmdchat main.go
+```
+
+## License
+MIT
