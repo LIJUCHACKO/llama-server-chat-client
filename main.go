@@ -707,7 +707,7 @@ func truncate(s string, n int) string {
 // ══════════════════════════════════════════════════════════════════════════════
 
 func readInput(rl *readline.Instance) (string, error) {
-	// First line – readline gives us history navigation (↑/↓) for free.
+	// First line – readline gives us history navigation (↑/↓).
 	rl.SetPrompt("\033[1;32mYou:\033[0m ")
 	firstLine, err := rl.Readline()
 	if err != nil {
@@ -717,6 +717,9 @@ func readInput(rl *readline.Instance) (string, error) {
 
 	// Single-line input that doesn't request continuation.
 	if !strings.HasSuffix(firstLine, "\\") && firstLine != "//" {
+		// Manually save to readline history so the full line is recorded
+		// (DisableAutoSaveHistory is set on the instance).
+		_ = rl.SaveHistory(firstLine)
 		return firstLine, nil
 	}
 
@@ -742,7 +745,11 @@ func readInput(rl *readline.Instance) (string, error) {
 			break
 		}
 	}
-	return strings.Join(lines, "\n"), nil
+	full := strings.Join(lines, "\n")
+	fullforreadline := strings.Join(lines, "\\n")
+	// Save the complete multiline text as a single history entry.
+	_ = rl.SaveHistory(fullforreadline)
+	return full, nil
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -965,13 +972,23 @@ func main() {
 	}
 
 	rl, err := readline.NewEx(&readline.Config{
-		HistoryLimit: 200,
+		HistoryLimit:           200,
+		DisableAutoSaveHistory: true, // we save manually so multiline entries are stored whole
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "readline init error:", err)
 		os.Exit(1)
 	}
 	defer rl.Close()
+
+	// Seed readline's in-memory history with user messages from the loaded .history file
+	// so that ↑/↓ navigation works for previously submitted prompts.
+	for _, m := range history {
+		if m.Role == "user" && strings.TrimSpace(m.Content) != "" {
+			fullforreadline := strings.ReplaceAll(m.Content, "\n", "\\n")
+			_ = rl.SaveHistory(fullforreadline)
+		}
+	}
 
 	for {
 		input, err := readInput(rl)
