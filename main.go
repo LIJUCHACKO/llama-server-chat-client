@@ -1073,7 +1073,7 @@ func main() {
 			fmt.Printf("\033[90mWorkdir: %s\033[0m\n", cfg.WorkDir)
 			continue
 		case "/help":
-			fmt.Println("\033[90mCommands  		 : /quit  /clear  /history  /workdir  /help\033[0m")
+			fmt.Println("\033[90mCommands  	     : /quit  /clear  /history  /workdir  /help\033[0m")
 			fmt.Println("\033[90mMultiline prompt: line ending should be '\\'\033[0m")
 			fmt.Println("\033[90mFile tools      : list_dir  read_file  write_file  append_file\033[0m")
 			fmt.Println("\033[90m                  create_dir  delete_path  move_path  search_files_with_name  search_file_contents  get_workdir\033[0m")
