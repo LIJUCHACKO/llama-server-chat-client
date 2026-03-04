@@ -708,8 +708,8 @@ func agentLoop(client *http.Client, cfg Config, history []Message, tools []ToolD
 // block of tool-related messages (assistant message with tool_calls + role:"tool"
 // result messages) that have already been consumed by doRequest.  This keeps
 // the context window lean without discarding any data before it is used.
-const maxToolContentLen = 20   // characters kept from a tool result
-const maxToolArgumentsLen = 20 // characters kept from tool_call arguments
+const maxToolContentLen = 200   // characters kept from a tool result
+const maxToolArgumentsLen = 200 // characters kept from tool_call arguments
 
 func trimPreviousToolRound(history []Message) []Message {
 	if len(history) == 0 {
@@ -720,7 +720,7 @@ func trimPreviousToolRound(history []Message) []Message {
 	i := len(history) - 1
 	for i >= 0 && history[i].Role == "tool" {
 		if len(history[i].Content) > maxToolContentLen {
-			history[i].Content = history[i].Content[:maxToolContentLen] + "\n…[trimmed]"
+			history[i].Content = history[i].Content[:maxToolContentLen] + "\n.....[trimmed]"
 		}
 		i--
 	}
@@ -731,7 +731,7 @@ func trimPreviousToolRound(history []Message) []Message {
 		for j := range history[i].ToolCalls {
 			args := history[i].ToolCalls[j].Function.Arguments
 			if len(args) > maxToolArgumentsLen {
-				history[i].ToolCalls[j].Function.Arguments = args[:maxToolArgumentsLen] + "…[trimmed]"
+				history[i].ToolCalls[j].Function.Arguments = args[:maxToolArgumentsLen] + ".....[trimmed]"
 			}
 		}
 	}
