@@ -664,11 +664,20 @@ func doStream(client *http.Client, cfg Config, history []Message, tools []ToolDe
 // ══════════════════════════════════════════════════════════════════════════════
 
 func agentLoop(client *http.Client, cfg Config, history []Message, tools []ToolDef) ([]Message, error) {
+	first := true
 	for {
+
 		msg, err := doRequest(client, cfg, history, tools)
+		// After the first call, trim the previous round's tool messages so
+		// that large results/arguments don't keep growing the context window.
+		if !first {
+			history = trimPreviousToolRound(history)
+		}
 		if err != nil {
 			return history, err
 		}
+
+		first = false
 		history = append(history, msg)
 
 		if len(msg.ToolCalls) == 0 {
@@ -688,10 +697,46 @@ func agentLoop(client *http.Client, cfg Config, history []Message, tools []ToolD
 				Role:       "tool",
 				ToolCallID: tc.ID,
 				Name:       tc.Function.Name,
-				Content:    result,
+				Content:    result, // trimmed at start of next iteration
 			})
 		}
 	}
+
+}
+
+// trimPreviousToolRound scans history from the end and trims the most recent
+// block of tool-related messages (assistant message with tool_calls + role:"tool"
+// result messages) that have already been consumed by doRequest.  This keeps
+// the context window lean without discarding any data before it is used.
+const maxToolContentLen = 20   // characters kept from a tool result
+const maxToolArgumentsLen = 20 // characters kept from tool_call arguments
+
+func trimPreviousToolRound(history []Message) []Message {
+	if len(history) == 0 {
+		return history
+	}
+
+	// Walk backwards over the trailing role:"tool" messages.
+	i := len(history) - 1
+	for i >= 0 && history[i].Role == "tool" {
+		if len(history[i].Content) > maxToolContentLen {
+			history[i].Content = history[i].Content[:maxToolContentLen] + "\n…[trimmed]"
+		}
+		i--
+	}
+
+	// The message just before those tool results should be the assistant
+	// message that issued the tool_calls.
+	if i >= 0 && history[i].Role == "assistant" {
+		for j := range history[i].ToolCalls {
+			args := history[i].ToolCalls[j].Function.Arguments
+			if len(args) > maxToolArgumentsLen {
+				history[i].ToolCalls[j].Function.Arguments = args[:maxToolArgumentsLen] + "…[trimmed]"
+			}
+		}
+	}
+
+	return history
 }
 
 func truncate(s string, n int) string {
