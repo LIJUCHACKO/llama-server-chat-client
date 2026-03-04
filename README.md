@@ -1,4 +1,4 @@
-# llama.cpp Chat CLI
+# Agentic llama.cpp command line Chat client 
 
 ![Screenshot](screenshot.jpg)
 
@@ -9,7 +9,7 @@ A command-line chat client for llama.cpp and OpenAI-compatible servers, with age
 - Streaming and non-streaming responses
 - Agentic file-system tools (list, read, write, append, move, delete, search, grep)
 - Conversation history persistence
-- Multiline input support
+- Multiline prompt can be typed by typing `\` at the end of a line
 - Customizable system prompt
 
 ## Usage
