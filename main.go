@@ -729,9 +729,16 @@ func trimPreviousToolRound(history []Message) []Message {
 	// message that issued the tool_calls.
 	if i >= 0 && history[i].Role == "assistant" {
 		for j := range history[i].ToolCalls {
-			args := history[i].ToolCalls[j].Function.Arguments
-			if len(args) > maxToolArgumentsLen {
-				history[i].ToolCalls[j].Function.Arguments = args[:maxToolArgumentsLen] + ".....[trimmed]"
+			var argMap map[string]any
+			if err := json.Unmarshal([]byte(history[i].ToolCalls[j].Function.Arguments), &argMap); err == nil {
+				for k, v := range argMap {
+					if s, ok := v.(string); ok && len(s) > maxToolArgumentsLen {
+						argMap[k] = s[:maxToolArgumentsLen] + ".....[trimmed]"
+					}
+				}
+				if trimmed, err := json.Marshal(argMap); err == nil {
+					history[i].ToolCalls[j].Function.Arguments = string(trimmed)
+				}
 			}
 		}
 	}
