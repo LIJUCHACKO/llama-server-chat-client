@@ -2,7 +2,7 @@
 
 ![Screenshot](screenshot.jpg)
 
-A command-line chat client for llama.cpp and OpenAI-compatible servers, with agentic file-system tools.
+A command-line chat client for llama.cpp and OpenAI-compatible servers, with agentic file-system tools. This is a very lightweight client.It can be used with llama server running on your PC.
 
 ## Features
 - Chat with local or remote LLM servers (OpenAI API compatible)
