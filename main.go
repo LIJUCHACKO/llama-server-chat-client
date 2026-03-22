@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -396,6 +397,43 @@ func toolGrepFiles(cfg Config, args map[string]any) string {
 	return out
 }
 
+func toolRunCommand(args map[string]any) string {
+	command, _ := args["command"].(string)
+	if command == "" {
+		return "error: command is required"
+	}
+
+	// Ask the user for confirmation before running the command.
+	fmt.Printf("\033[1;33m[tool] The assistant wants to run the following command:\033[0m\n")
+	fmt.Printf("\033[1;37m  $ %s\033[0m\n", command)
+	fmt.Printf("\033[1;33mAllow execution? [y/N]: \033[0m")
+
+	var answer string
+	fmt.Scanln(&answer)
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	if answer != "y" && answer != "yes" {
+		return "error: user denied execution of command"
+	}
+
+	cmd := exec.Command("bash", "-c", command)
+	var outBuf, errBuf strings.Builder
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	runErr := cmd.Run()
+
+	result := outBuf.String()
+	if errBuf.Len() > 0 {
+		result += "\n[stderr]\n" + errBuf.String()
+	}
+	if runErr != nil {
+		result += "\n[exit error] " + runErr.Error()
+	}
+	if result == "" {
+		result = "(no output)"
+	}
+	return result
+}
+
 func toolEditFileLines(cfg Config, args map[string]any) string {
 	rawPath, _ := args["path"].(string)
 	// start_line and end_line are 1-based, inclusive.
@@ -510,6 +548,11 @@ func buildTools() []ToolDef {
 			Description: "Replace a range of lines in a file with new content. start_line and end_line are 1-based and inclusive. Set new_content to an empty string to delete the lines. Existing lines outside the range are preserved.",
 			Parameters:  param(`{"type":"object","properties":{"path":{"type":"string","description":"File path relative to workdir"},"start_line":{"type":"integer","description":"First line to replace (1-based, inclusive)"},"end_line":{"type":"integer","description":"Last line to replace (1-based, inclusive)"},"new_content":{"type":"string","description":"Replacement text. May contain newlines for multiple lines. Use empty string to delete the lines."}},"required":["path","start_line","end_line","new_content"]}`),
 		}},
+		{Type: "function", Function: ToolFuncDef{
+			Name:        "run_command",
+			Description: "Run an arbitrary shell command (bash -c). The user will be asked for confirmation before the command is executed. Use this for tasks that require CLI tools such as git, grep, curl, make, etc.",
+			Parameters:  param(`{"type":"object","properties":{"command":{"type":"string","description":"The shell command to execute"}},"required":["command"]}`),
+		}},
 	}
 }
 
@@ -549,6 +592,8 @@ func dispatchTool(cfg Config, mcpMgr *MCPManager, name string, rawArgs string) s
 		return toolGrepFiles(cfg, args)
 	case "edit_file_lines":
 		return toolEditFileLines(cfg, args)
+	case "run_command":
+		return toolRunCommand(args)
 	default:
 		return fmt.Sprintf("error: unknown tool %q", name)
 	}
@@ -1063,7 +1108,8 @@ func main() {
 	if !*noTools {
 		systemContent += fmt.Sprintf(
 			"\n\nYou have access to file-system tools. The working directory is: %s\n"+
-				"Available tools: list_dir, read_file, write_file, append_file, create_dir, delete_path, move_path, search_files_with_name, search_file_contents, get_workdir.",
+				"Available tools: list_dir, read_file, write_file, append_file, create_dir, delete_path, move_path, search_files_with_name, search_file_contents, get_workdir, run_command.\n"+
+				"run_command executes a shell command via bash. The user will be prompted to approve each command before it runs.",
 			cfg.WorkDir,
 		)
 	}
@@ -1173,6 +1219,7 @@ func main() {
 			fmt.Println("\033[90mMultiline prompt: line ending should be '\\'\033[0m")
 			fmt.Println("\033[90mFile tools      : list_dir  read_file  write_file  append_file\033[0m")
 			fmt.Println("\033[90m                  create_dir  delete_path  move_path  search_files_with_name  search_file_contents  get_workdir\033[0m")
+			fmt.Println("\033[90mShell tool      : run_command  (user confirmation required before each execution)\033[0m")
 			continue
 		}
 

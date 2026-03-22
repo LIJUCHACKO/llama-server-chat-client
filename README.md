@@ -54,6 +54,25 @@ When enabled, the assistant can use these tools:
 - `search_files_with_name`  : Search for files/dirs by glob pattern
 - `search_file_contents`    : Grep files for regex pattern
 - `get_workdir`             : Show working directory
+- `edit_file_lines`         : To edit selected lines in a file
+- `run_command`             : to run bash command
+
+
+## Additional MCP servers
+
+Addition MCP stdio servers can be configured in ~/.clichat/mcp-config.json . Sample content is given below
+```
+{
+  "tools": {
+    "mcpServers": {
+      "myRAG":{
+        "command":"pathto__mcp_server",
+        "args":["argument1"]
+      }
+    }
+  }
+}
+```
 
 ## Additional Instructions
 Additional instructions to enhance system prompt can be mentioned in '.instructions' file in the working directory. Restart the program to take effect.
