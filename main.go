@@ -396,6 +396,60 @@ func toolGrepFiles(cfg Config, args map[string]any) string {
 	return out
 }
 
+func toolEditFileLines(cfg Config, args map[string]any) string {
+	rawPath, _ := args["path"].(string)
+	// start_line and end_line are 1-based, inclusive.
+	startLineF, hasStart := args["start_line"].(float64)
+	endLineF, hasEnd := args["end_line"].(float64)
+	newContent, _ := args["new_content"].(string)
+
+	if !hasStart || !hasEnd {
+		return "error: start_line and end_line are required"
+	}
+	startLine := int(startLineF)
+	endLine := int(endLineF)
+	if startLine < 1 || endLine < startLine {
+		return "error: start_line must be >= 1 and end_line must be >= start_line"
+	}
+
+	path, err := resolveSafe(cfg, rawPath)
+	if err != nil {
+		return "error: " + err.Error()
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "error: " + err.Error()
+	}
+
+	lines := strings.Split(string(data), "\n")
+	// If the file ends with a newline, Split produces a trailing empty element.
+	// We preserve it faithfully.
+
+	if startLine > len(lines) {
+		return fmt.Sprintf("error: start_line %d is beyond the file length (%d lines)", startLine, len(lines))
+	}
+	if endLine > len(lines) {
+		endLine = len(lines)
+	}
+
+	// Build replacement: lines before range + new content lines + lines after range.
+	var replacement []string
+	replacement = append(replacement, lines[:startLine-1]...)
+	if newContent != "" {
+		replacement = append(replacement, strings.Split(newContent, "\n")...)
+	}
+	if endLine < len(lines) {
+		replacement = append(replacement, lines[endLine:]...)
+	}
+
+	result := strings.Join(replacement, "\n")
+	if err := os.WriteFile(path, []byte(result), 0644); err != nil {
+		return "error: " + err.Error()
+	}
+	return fmt.Sprintf("replaced lines %d-%d in %s (%d bytes written)", startLine, endLine, path, len(result))
+}
+
 // ── Tool registry ─────────────────────────────────────────────────────────────
 
 func buildTools() []ToolDef {
@@ -451,10 +505,22 @@ func buildTools() []ToolDef {
 			Description: "Recursively search file contents under a directory for lines matching a regular expression. Returns matching lines in the format 'path:line_number: line_content'.",
 			Parameters:  param(`{"type":"object","properties":{"path":{"type":"string","description":"Root directory to search from (default '.')"},"pattern":{"type":"string","description":"Regular expression to match against file contents"}},"required":["pattern"]}`),
 		}},
+		{Type: "function", Function: ToolFuncDef{
+			Name:        "edit_file_lines",
+			Description: "Replace a range of lines in a file with new content. start_line and end_line are 1-based and inclusive. Set new_content to an empty string to delete the lines. Existing lines outside the range are preserved.",
+			Parameters:  param(`{"type":"object","properties":{"path":{"type":"string","description":"File path relative to workdir"},"start_line":{"type":"integer","description":"First line to replace (1-based, inclusive)"},"end_line":{"type":"integer","description":"Last line to replace (1-based, inclusive)"},"new_content":{"type":"string","description":"Replacement text. May contain newlines for multiple lines. Use empty string to delete the lines."}},"required":["path","start_line","end_line","new_content"]}`),
+		}},
 	}
 }
 
-func dispatchTool(cfg Config, name string, rawArgs string) string {
+func dispatchTool(cfg Config, mcpMgr *MCPManager, name string, rawArgs string) string {
+	// Try MCP servers first (tool names are prefixed "serverName__toolName").
+	if mcpMgr != nil {
+		if result, ok := mcpMgr.Dispatch(name, rawArgs); ok {
+			return result
+		}
+	}
+
 	var args map[string]any
 	_ = json.Unmarshal([]byte(rawArgs), &args)
 	if args == nil {
@@ -481,6 +547,8 @@ func dispatchTool(cfg Config, name string, rawArgs string) string {
 		return toolGetWorkDir(cfg)
 	case "search_file_contents":
 		return toolGrepFiles(cfg, args)
+	case "edit_file_lines":
+		return toolEditFileLines(cfg, args)
 	default:
 		return fmt.Sprintf("error: unknown tool %q", name)
 	}
@@ -663,21 +731,21 @@ func doStream(client *http.Client, cfg Config, history []Message, tools []ToolDe
 // Agentic loop
 // ══════════════════════════════════════════════════════════════════════════════
 
-func agentLoop(client *http.Client, cfg Config, history []Message, tools []ToolDef) ([]Message, error) {
-	first := true
+func agentLoop(client *http.Client, cfg Config, mcpMgr *MCPManager, history []Message, tools []ToolDef) ([]Message, error) {
+	//first := true
 	for {
 
 		msg, err := doRequest(client, cfg, history, tools)
 		// After the first call, trim the previous round's tool messages so
 		// that large results/arguments don't keep growing the context window.
-		if !first {
-			history = trimPreviousToolRound(history)
-		}
+		//if !first {
+		//	history = trimPreviousToolRound(history) //creates confusion for LLM
+		//}
 		if err != nil {
 			return history, err
 		}
 
-		first = false
+		//first = false
 		history = append(history, msg)
 
 		if len(msg.ToolCalls) == 0 {
@@ -691,7 +759,7 @@ func agentLoop(client *http.Client, cfg Config, history []Message, tools []ToolD
 		// Execute tools
 		for _, tc := range msg.ToolCalls {
 			fmt.Printf("\033[90m[tool] %s(%s ..)\033[0m\n", tc.Function.Name, truncate(tc.Function.Arguments, 100))
-			result := dispatchTool(cfg, tc.Function.Name, tc.Function.Arguments)
+			result := dispatchTool(cfg, mcpMgr, tc.Function.Name, tc.Function.Arguments)
 			fmt.Printf("\033[90m[result] %s  ...\033[0m\n", truncate(result, 100))
 			history = append(history, Message{
 				Role:       "tool",
@@ -981,15 +1049,30 @@ func main() {
 		tools = buildTools()
 	}
 
+	// Start MCP servers from ~/.clichat/mcp-config.json
+	mcpMgr := NewMCPManager()
+	mcpTools, mcpWarnings := mcpMgr.LoadAndStart()
+	for _, w := range mcpWarnings {
+		fmt.Fprintf(os.Stderr, "\033[33m%s\033[0m\n", w)
+	}
+	tools = append(tools, mcpTools...)
+
 	client := &http.Client{}
 
 	systemContent := cfg.SystemPrompt
-	if len(tools) > 0 {
+	if !*noTools {
 		systemContent += fmt.Sprintf(
 			"\n\nYou have access to file-system tools. The working directory is: %s\n"+
 				"Available tools: list_dir, read_file, write_file, append_file, create_dir, delete_path, move_path, search_files_with_name, search_file_contents, get_workdir.",
 			cfg.WorkDir,
 		)
+	}
+	if len(mcpTools) > 0 {
+		mcpNames := make([]string, 0, len(mcpTools))
+		for _, t := range mcpTools {
+			mcpNames = append(mcpNames, t.Function.Name)
+		}
+		systemContent += "\n\nYou also have access to the following MCP tools: " + strings.Join(mcpNames, ", ") + "."
 	}
 
 	// Load .instructions file and enhance system content
@@ -1009,11 +1092,15 @@ func main() {
 	fmt.Println("\033[1;33m║   llama.cpp Chat  (type /quit to exit, /help for commands)  ║\033[0m")
 	fmt.Println("\033[1;33m╚═════════════════════════════════════════════════════════════╝\033[0m")
 	toolsLabel := "disabled"
-	if len(tools) > 0 {
+	if !*noTools {
 		toolsLabel = fmt.Sprintf("enabled  (workdir: %s)", cfg.WorkDir)
 	}
 	fmt.Printf("\033[90mURL: %s  |  Model: %s  |  Stream: %v\033[0m\n", cfg.BaseURL, cfg.Model, cfg.Stream)
-	fmt.Printf("\033[90mFile tools: %s\033[0m\n\n", toolsLabel)
+	fmt.Printf("\033[90mFile tools: %s\033[0m\n", toolsLabel)
+	if len(mcpTools) > 0 {
+		fmt.Printf("\033[90mMCP tools:  %d tool(s) from %s\033[0m\n", len(mcpTools), MCPConfigPath())
+	}
+	fmt.Println()
 
 	// Load previous history from .history file and display it
 	history := loadHistory(cfg.WorkDir)
@@ -1047,6 +1134,7 @@ func main() {
 		if err != nil {
 			if err == io.EOF || err == readline.ErrInterrupt {
 				saveHistory(cfg.WorkDir, history)
+				mcpMgr.StopAll()
 				fmt.Println("\nBye!")
 				return
 			}
@@ -1062,6 +1150,7 @@ func main() {
 		switch strings.ToLower(input) {
 		case "/quit", "/exit", "/q":
 			saveHistory(cfg.WorkDir, history)
+			mcpMgr.StopAll()
 			fmt.Println("Bye!")
 			return
 		case "/clear", "/reset":
@@ -1089,7 +1178,7 @@ func main() {
 
 		history = append(history, Message{Role: "user", Content: input})
 
-		history, err = agentLoop(client, cfg, history, tools)
+		history, err = agentLoop(client, cfg, mcpMgr, history, tools)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "\033[1;31merror:\033[0m", err)
 			history = history[:len(history)-1]
