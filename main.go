@@ -436,18 +436,11 @@ func toolRunCommand(args map[string]any) string {
 
 func toolEditFileLines(cfg Config, args map[string]any) string {
 	rawPath, _ := args["path"].(string)
-	// start_line and end_line are 1-based, inclusive.
-	startLineF, hasStart := args["start_line"].(float64)
-	endLineF, hasEnd := args["end_line"].(float64)
+	originalText, hasOriginal := args["original_text"].(string)
 	newContent, _ := args["new_content"].(string)
 
-	if !hasStart || !hasEnd {
-		return "error: start_line and end_line are required"
-	}
-	startLine := int(startLineF)
-	endLine := int(endLineF)
-	if startLine < 1 || endLine < startLine {
-		return "error: start_line must be >= 1 and end_line must be >= start_line"
+	if !hasOriginal || originalText == "" {
+		return "error: original_text is required"
 	}
 
 	path, err := resolveSafe(cfg, rawPath)
@@ -460,32 +453,21 @@ func toolEditFileLines(cfg Config, args map[string]any) string {
 		return "error: " + err.Error()
 	}
 
-	lines := strings.Split(string(data), "\n")
-	// If the file ends with a newline, Split produces a trailing empty element.
-	// We preserve it faithfully.
-
-	if startLine > len(lines) {
-		return fmt.Sprintf("error: start_line %d is beyond the file length (%d lines)", startLine, len(lines))
+	fileContent := string(data)
+	idx := strings.Index(fileContent, originalText)
+	if idx == -1 {
+		return "error: original_text not found in file"
 	}
-	if endLine > len(lines) {
-		endLine = len(lines)
-	}
-
-	// Build replacement: lines before range + new content lines + lines after range.
-	var replacement []string
-	replacement = append(replacement, lines[:startLine-1]...)
-	if newContent != "" {
-		replacement = append(replacement, strings.Split(newContent, "\n")...)
-	}
-	if endLine < len(lines) {
-		replacement = append(replacement, lines[endLine:]...)
+	// Ensure the text is unique; if it appears more than once, require more context.
+	if strings.Index(fileContent[idx+len(originalText):], originalText) != -1 {
+		return "error: original_text matches multiple locations in the file; include more surrounding context to make it unique"
 	}
 
-	result := strings.Join(replacement, "\n")
+	result := fileContent[:idx] + newContent + fileContent[idx+len(originalText):]
 	if err := os.WriteFile(path, []byte(result), 0644); err != nil {
 		return "error: " + err.Error()
 	}
-	return fmt.Sprintf("replaced lines %d-%d in %s (%d bytes written)", startLine, endLine, path, len(result))
+	return fmt.Sprintf("replaced text in %s (%d bytes written)", path, len(result))
 }
 
 // ── Tool registry ─────────────────────────────────────────────────────────────
@@ -545,8 +527,8 @@ func buildTools() []ToolDef {
 		}},
 		{Type: "function", Function: ToolFuncDef{
 			Name:        "edit_file_lines",
-			Description: "Replace a range of lines in a file with new content. start_line and end_line are 1-based and inclusive. Set new_content to an empty string to delete the lines. Existing lines outside the range are preserved.",
-			Parameters:  param(`{"type":"object","properties":{"path":{"type":"string","description":"File path relative to workdir"},"start_line":{"type":"integer","description":"First line to replace (1-based, inclusive)"},"end_line":{"type":"integer","description":"Last line to replace (1-based, inclusive)"},"new_content":{"type":"string","description":"Replacement text. May contain newlines for multiple lines. Use empty string to delete the lines."}},"required":["path","start_line","end_line","new_content"]}`),
+			Description: "Replace a specific block of text in a file with new content. Provide the exact original text to find and the replacement. To ensure a unique and reliable match, include at least 2-3 lines of surrounding context above and below the target lines in original_text. The original_text must match exactly once in the file; if it appears multiple times you must include more context to make it unique.",
+			Parameters:  param(`{"type":"object","properties":{"path":{"type":"string","description":"File path relative to workdir"},"original_text":{"type":"string","description":"The exact text to find and replace, including a few lines of surrounding context above and below the target lines for reliable matching."},"new_content":{"type":"string","description":"Replacement text. May contain newlines for multiple lines. Use empty string to delete the original text."}},"required":["path","original_text","new_content"]}`),
 		}},
 		{Type: "function", Function: ToolFuncDef{
 			Name:        "run_command",
